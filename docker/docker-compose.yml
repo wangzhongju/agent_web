@@ -1,0 +1,26 @@
+name: openharness-test-web
+
+services:
+  test-web:
+    image: openharness-test-web:latest
+    container_name: openharness-test-web
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        NODE_IMAGE: ${TEST_WEB_NODE_IMAGE:-swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/node:20-bookworm-slim}
+        NGINX_IMAGE: ${TEST_WEB_NGINX_IMAGE:-swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/nginx:1.27}
+        VITE_OPENHARNESS_API_BASE: ${VITE_OPENHARNESS_API_BASE:-}
+    restart: unless-stopped
+    ports:
+      - "${TEST_WEB_PORT:-5173}:80"
+    environment:
+      OPENHARNESS_BACKEND_UPSTREAM: ${OPENHARNESS_BACKEND_UPSTREAM:-http://openharness-dev:8787}
+      CLIENT_MAX_BODY_SIZE: ${CLIENT_MAX_BODY_SIZE:-100m}
+    networks:
+      - openharness-backend
+
+networks:
+  openharness-backend:
+    external: true
+    name: ${OPENHARNESS_BACKEND_NETWORK:-openharness-dev_default}

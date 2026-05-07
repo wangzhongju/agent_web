@@ -1,0 +1,8 @@
+node_modules
+dist
+*.tsbuildinfo
+.git
+.gitignore
+.DS_Store
+docker/env.frontend
+docker/server.js
