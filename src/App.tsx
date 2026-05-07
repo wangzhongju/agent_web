@@ -1,4 +1,4 @@
-import {FormEvent, KeyboardEvent, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
+import {FormEvent, KeyboardEvent, WheelEvent, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import ReactMarkdown from 'react-markdown';
 import {Navigate, Route, Routes, useNavigate, useParams} from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
@@ -214,6 +214,7 @@ function WorkspacePage() {
   const [selectedTool, setSelectedTool] = useState<ToolFeedback | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SessionRecord | null>(null);
   const [pendingPrompt, setPendingPrompt] = useState<PendingPrompt>(null);
+  const [creatingPrompt, setCreatingPrompt] = useState(false);
   const [modelChoice, setModelChoice] = useState<string | null>(null);
   const [greeting] = useState(() => UI.greetings[Math.floor(Math.random() * UI.greetings.length)]);
 
@@ -224,25 +225,39 @@ function WorkspacePage() {
   }, [orgId, projectId, sessionId]);
 
   useEffect(() => {
+    let cancelled = false;
     if (!sessionId) {
       setInitialMessages([]);
       setInitialToolEvents([]);
       setSessionLoaded(true);
-      return;
+      return () => {
+        cancelled = true;
+      };
     }
     setSessionLoaded(false);
     getSession(sessionId)
       .then((detail) => {
+        if (cancelled) {
+          return;
+        }
         setInitialMessages(detail.messages.map((message) => ({id: message.id, role: message.role as TranscriptItem['role'], text: message.text})));
         setInitialToolEvents(detail.tool_events ?? []);
       })
       .catch(() => {
+        if (cancelled) {
+          return;
+        }
         setInitialMessages([]);
         setInitialToolEvents([]);
       })
       .finally(() => {
-        setSessionLoaded(true);
+        if (!cancelled) {
+          setSessionLoaded(true);
+        }
       });
+    return () => {
+      cancelled = true;
+    };
   }, [sessionId]);
 
   useEffect(() => {
@@ -301,12 +316,14 @@ function WorkspacePage() {
 
   const transcript = mergeTranscript(initialMessages, webSession.transcript);
   const toolEvents = mergeToolEvents(initialToolEvents, webSession.toolEvents);
-  const hasMessages = transcript.length > 0 || Boolean(webSession.assistantBuffer);
+  const hasActiveConversation = creatingPrompt || Boolean(pendingPrompt) || webSession.busy;
+  const hasMessages = Boolean(sessionId) || transcript.length > 0 || Boolean(webSession.assistantBuffer) || hasActiveConversation;
   const activeOrg = orgs.find((org) => org.id === orgId)?.name ?? 'OpenHarness';
   const composerStatus = sessionId ? webSession.status : runtime;
 
   function handleNewSession() {
     setPendingPrompt(null);
+    setCreatingPrompt(false);
     setInitialMessages([]);
     navigate(`/org/${orgId}/project/${projectId}`);
   }
@@ -317,12 +334,17 @@ function WorkspacePage() {
       webSession.submit(line, attachments);
       return;
     }
-    const title = line.trim().slice(0, 60) || files?.[0]?.name || 'New chat';
-    const created = await createSession(orgId, projectId, title);
-    const attachments = files?.length ? (await uploadSessionAttachments(created.id, files)).attachments : undefined;
-    setPendingPrompt({sessionId: created.id, line, attachments, modelChoice});
-    await refreshWorkspace(orgId, projectId);
-    navigate(`/org/${orgId}/project/${projectId}/session/${created.id}`);
+    setCreatingPrompt(true);
+    try {
+      const title = line.trim().slice(0, 60) || files?.[0]?.name || 'New chat';
+      const created = await createSession(orgId, projectId, title);
+      const attachments = files?.length ? (await uploadSessionAttachments(created.id, files)).attachments : undefined;
+      setPendingPrompt({sessionId: created.id, line, attachments, modelChoice});
+      navigate(`/org/${orgId}/project/${projectId}/session/${created.id}`);
+      await refreshWorkspace(orgId, projectId, created.id);
+    } finally {
+      setCreatingPrompt(false);
+    }
   }
 
   async function handleRename(session: SessionRecord, title: string) {
@@ -375,7 +397,7 @@ function WorkspacePage() {
           assistantBuffer={webSession.assistantBuffer}
           connected={sessionId ? webSession.connected : true}
           status={webSession.status}
-          busy={Boolean(pendingPrompt) || webSession.busy}
+          busy={hasActiveConversation}
           toolEvents={toolEvents}
           greeting={greeting}
           loading={Boolean(sessionId) && !sessionLoaded}
@@ -384,7 +406,7 @@ function WorkspacePage() {
         <Composer
           hasMessages={hasMessages}
           disabled={composerDisabled}
-          busy={Boolean(pendingPrompt) || webSession.busy}
+          busy={hasActiveConversation}
           status={composerStatus}
           modelChoice={modelChoice}
           onModelChoiceChange={setModelChoice}
@@ -597,6 +619,7 @@ function Conversation({
   const lastAssistantIndex = findLastAssistantIndex(visibleTranscript);
   const answerToolEvents = compactToolEvents(toolEvents);
   const conversationRef = useRef<HTMLElement | null>(null);
+  const shouldStickToBottomRef = useRef(true);
   const latestVisibleMessage = visibleTranscript[visibleTranscript.length - 1];
   const scrollKey = [
     visibleTranscript.length,
@@ -612,27 +635,57 @@ function Conversation({
     if (!element) {
       return;
     }
+    if (!shouldStickToBottomRef.current) {
+      return;
+    }
     const scrollToBottom = () => {
       element.scrollTop = element.scrollHeight;
     };
     scrollToBottom();
-    const frame = window.requestAnimationFrame(scrollToBottom);
+    const frame = window.requestAnimationFrame(() => {
+      if (shouldStickToBottomRef.current) {
+        scrollToBottom();
+      }
+    });
     return () => window.cancelAnimationFrame(frame);
   }, [scrollKey]);
 
-  if (!visibleTranscript.length && !assistantBuffer) {
+  function updateStickToBottom() {
+    const element = conversationRef.current;
+    if (!element) {
+      return;
+    }
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    shouldStickToBottomRef.current = distanceFromBottom < 80;
+  }
+
+  function handleWheel(event: WheelEvent<HTMLElement>) {
+    if (event.deltaY < 0) {
+      shouldStickToBottomRef.current = false;
+    }
+  }
+
+  function handleTouchMove() {
+    updateStickToBottom();
+  }
+
+  if (loading && !visibleTranscript.length && !assistantBuffer && !busy) {
+    return <section className="conversation" ref={conversationRef} />;
+  }
+
+  if (!visibleTranscript.length && !assistantBuffer && !busy) {
     return (
       <section className="empty-state">
-        {loading ? null : <h1>{greeting}</h1>}
+        <h1>{greeting}</h1>
         <div className="runtime-chip">
           <span className={`connection-dot ${connected ? 'online' : ''}`} />
-          {loading ? UI.connecting : connected ? String(status.model ?? 'runtime ready') : UI.connecting}
+          {connected ? String(status.model ?? 'runtime ready') : UI.connecting}
         </div>
       </section>
     );
   }
   return (
-    <section className="conversation" ref={conversationRef}>
+    <section className="conversation" ref={conversationRef} onScroll={updateStickToBottom} onWheel={handleWheel} onTouchMove={handleTouchMove}>
       {visibleTranscript.map((item, index) => (
         <div key={`${index}-${item.role}`}>
           <MessageBubble item={item} />
