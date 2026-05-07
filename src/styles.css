@@ -745,7 +745,7 @@ button { cursor: pointer; }
   cursor: default;
 }
 
- .hidden-file-input {
+.hidden-file-input {
   position: fixed;
   width: 1px;
   height: 1px;
@@ -1583,6 +1583,11 @@ button { cursor: pointer; }
   place-items: center;
   padding: 24px;
   background: #f7f8fa;
+}
+
+.auth-check-shell {
+  min-height: 100vh;
+  background: #ffffff;
 }
 
 .login-panel {

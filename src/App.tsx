@@ -151,15 +151,7 @@ export function App() {
   }, []);
 
   if (!authReady) {
-    return (
-      <main className="login-shell">
-        <section className="login-panel">
-          <div className="mark"><Bot size={26} /></div>
-          <h1>OpenHarness</h1>
-          <p>Connecting to your workspace.</p>
-        </section>
-      </main>
-    );
+    return <main className="auth-check-shell" aria-label="Checking authentication" />;
   }
 
   return (
