@@ -16,13 +16,15 @@ bash docker/docker.sh logs
 Default URL:
 
 ```text
-http://192.168.88.92:5173
+http://192.168.88.91:5173
 ```
 
-Default backend upstream inside Docker:
+Default backend upstream:
 
 ```text
-http://openharness-dev:8787
+http://192.168.88.92:8787
 ```
 
-If the backend Compose network changes, edit `docker/env.frontend` and set `OPENHARNESS_BACKEND_NETWORK` and `OPENHARNESS_BACKEND_UPSTREAM` accordingly.
+When the frontend and backend run on different hosts, the frontend container cannot join the backend host's Docker bridge network. Keep `VITE_OPENHARNESS_API_BASE` empty and set `OPENHARNESS_BACKEND_UPSTREAM` to the backend host URL in `docker/env.frontend`.
+
+The compose file uses Docker's default `bridge` network and does not declare an external network, so it does not require creating host-level Docker networks.

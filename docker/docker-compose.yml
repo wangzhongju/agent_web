@@ -12,15 +12,9 @@ services:
         NGINX_IMAGE: ${TEST_WEB_NGINX_IMAGE:-swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/nginx:1.27}
         VITE_OPENHARNESS_API_BASE: ${VITE_OPENHARNESS_API_BASE:-}
     restart: unless-stopped
+    network_mode: bridge
     ports:
       - "${TEST_WEB_PORT:-5173}:80"
     environment:
-      OPENHARNESS_BACKEND_UPSTREAM: ${OPENHARNESS_BACKEND_UPSTREAM:-http://openharness-dev:8787}
+      OPENHARNESS_BACKEND_UPSTREAM: ${OPENHARNESS_BACKEND_UPSTREAM:-http://192.168.88.92:8787}
       CLIENT_MAX_BODY_SIZE: ${CLIENT_MAX_BODY_SIZE:-100m}
-    networks:
-      - openharness-backend
-
-networks:
-  openharness-backend:
-    external: true
-    name: ${OPENHARNESS_BACKEND_NETWORK:-openharness-dev_default}
