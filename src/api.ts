@@ -1,6 +1,57 @@
 import type {OrganizationRecord, ProjectRecord, SessionDetail, SessionRecord, UploadedAttachment} from './types';
 
 const API_BASE = import.meta.env.VITE_OPENHARNESS_API_BASE ?? '';
+const PLATFORM_USER_STORAGE_KEY = 'openharness.platformUser';
+
+type PlatformIdentity = {
+  id: string;
+  name?: string;
+  email?: string;
+};
+
+function platformIdentity(): PlatformIdentity {
+  const params = new URLSearchParams(window.location.search);
+  const fromQuery = {
+    id: params.get('platform_user_id') ?? params.get('userId') ?? '',
+    name: params.get('platform_user_name') ?? '',
+    email: params.get('platform_user_email') ?? '',
+  };
+  if (fromQuery.id) {
+    window.localStorage.setItem(PLATFORM_USER_STORAGE_KEY, JSON.stringify(fromQuery));
+    return normalizePlatformIdentity(fromQuery);
+  }
+  const stored = window.localStorage.getItem(PLATFORM_USER_STORAGE_KEY);
+  if (stored) {
+    try {
+      return normalizePlatformIdentity(JSON.parse(stored) as PlatformIdentity);
+    } catch {
+      window.localStorage.removeItem(PLATFORM_USER_STORAGE_KEY);
+    }
+  }
+  return normalizePlatformIdentity({
+    id: import.meta.env.VITE_PLATFORM_USER_ID ?? 'platform-demo-user',
+    name: import.meta.env.VITE_PLATFORM_USER_NAME ?? 'Platform Demo User',
+    email: import.meta.env.VITE_PLATFORM_USER_EMAIL ?? '',
+  });
+}
+
+function normalizePlatformIdentity(identity: PlatformIdentity): PlatformIdentity {
+  const id = String(identity.id || '').trim() || 'platform-demo-user';
+  return {
+    id,
+    name: identity.name ? String(identity.name).trim() : undefined,
+    email: identity.email ? String(identity.email).trim() : undefined,
+  };
+}
+
+function platformIdentityHeaders(): Record<string, string> {
+  const identity = platformIdentity();
+  return {
+    'X-Platform-User-Id': identity.id,
+    ...(identity.name ? {'X-Platform-User-Name': identity.name} : {}),
+    ...(identity.email ? {'X-Platform-User-Email': identity.email} : {}),
+  };
+}
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -8,6 +59,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: {
       'content-type': 'application/json',
+      ...platformIdentityHeaders(),
       ...(init?.headers ?? {}),
     },
   });
@@ -27,7 +79,11 @@ export function authSession() {
 }
 
 export function logout() {
-  return fetch(`${API_BASE}/api/auth/logout`, {method: 'POST', credentials: 'include'});
+  return fetch(`${API_BASE}/api/auth/logout`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: platformIdentityHeaders(),
+  });
 }
 
 export function listProjects(organizationId?: string) {
@@ -72,6 +128,7 @@ export async function uploadSessionAttachments(sessionId: string, files: File[])
   const response = await fetch(`${API_BASE}/api/sessions/${encodeURIComponent(sessionId)}/attachments`, {
     method: 'POST',
     credentials: 'include',
+    headers: platformIdentityHeaders(),
     body: form,
   });
   if (!response.ok) {
@@ -91,7 +148,12 @@ export function webSocketUrl(sessionId: string) {
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.pathname = `/api/ws/sessions/${encodeURIComponent(sessionId)}`;
   url.search = '';
+  url.searchParams.set('platform_user_id', platformIdentity().id);
   return url.toString();
+}
+
+export function currentPlatformIdentity() {
+  return platformIdentity();
 }
 
 export function newRequestId() {
